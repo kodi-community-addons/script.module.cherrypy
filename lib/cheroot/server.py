@@ -69,7 +69,7 @@ from . import errors, __version__
 from ._compat import ntob
 from .workers import threadpool
 from .makefile import MakeFile
-
+from urllib import quote
 
 __all__ = ('HTTPRequest', 'HTTPConnection', 'HTTPServer',
            'SizeCheckWrapper', 'KnownLengthRFile', 'ChunkedRFile',
@@ -87,6 +87,8 @@ LF = b'\n'
 CRLF = b'\r\n'
 TAB = b'\t'
 SPACE = b' '
+AMPERSAND = b'&'
+QUOTE = b'"'
 COLON = b':'
 SEMICOLON = b';'
 EMPTY = b''
@@ -693,7 +695,27 @@ class HTTPRequest(object):
             self.simple_response(
                 '400 Bad Request', 'HTTP requires CRLF terminators')
             return False
-
+            
+        # TEMP: Workaround for Kodi which is using non urlencoded urls
+        try:
+            splitter = "HEAD " if "HEAD " in request_line else "GET "
+            request_path = request_line.split(splitter)[1].split(" HTTP/")[0]
+            if QUOTE in request_path:
+                for part in request_path.split('"')[1::2]:
+                    bad_part = "%s%s%s" %(QUOTE, part, QUOTE)
+                    request_line = request_line.replace(bad_part, quote(part))
+            elif SPACE in request_path:
+                corrected_request_path = request_path.replace(SPACE, '%20')
+                request_line = request_line.replace(request_path, corrected_request_path)
+            if not QUESTION_MARK in request_path and AMPERSAND in request_path:
+                action = request_path.split(AMPERSAND)[0]
+                wrong_action = "%s%s" %(action, AMPERSAND)
+                correct_action = "%s%s" %(action, QUESTION_MARK)
+                request_line = request_line.replace(wrong_action, correct_action)
+        except Exception:
+            pass
+        # end of kodi workaround
+        
         try:
             method, uri, req_protocol = request_line.strip().split(SPACE, 2)
             req_protocol_str = req_protocol.decode('ascii')
