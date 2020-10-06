@@ -9,31 +9,38 @@ import cheroot.server
 import cherrypy
 from cherrypy._cperror import format_exc, bare_error
 from cherrypy.lib import httputil
+from ._cpcompat import tonative
 
 
 class NativeGateway(cheroot.server.Gateway):
+    """Native gateway implementation allowing to bypass WSGI."""
 
     recursive = False
 
     def respond(self):
+        """Obtain response from CherryPy machinery and then send it."""
         req = self.req
         try:
             # Obtain a Request object from CherryPy
-            local = req.server.bind_addr
+            local = req.server.bind_addr  # FIXME: handle UNIX sockets
+            local = tonative(local[0]), local[1]
             local = httputil.Host(local[0], local[1], '')
-            remote = req.conn.remote_addr, req.conn.remote_port
+            remote = tonative(req.conn.remote_addr), req.conn.remote_port
             remote = httputil.Host(remote[0], remote[1], '')
 
-            scheme = req.scheme
-            sn = cherrypy.tree.script_name(req.uri or '/')
+            scheme = tonative(req.scheme)
+            sn = cherrypy.tree.script_name(tonative(req.uri or '/'))
             if sn is None:
                 self.send_response('404 Not Found', [], [''])
             else:
                 app = cherrypy.tree.apps[sn]
-                method = req.method
-                path = req.path
-                qs = req.qs or ''
-                headers = req.inheaders.items()
+                method = tonative(req.method)
+                path = tonative(req.path)
+                qs = tonative(req.qs or '')
+                headers = (
+                    (tonative(h), tonative(v))
+                    for h, v in req.inheaders.items()
+                )
                 rfile = req.rfile
                 prev = None
 
@@ -50,8 +57,11 @@ class NativeGateway(cheroot.server.Gateway):
                         # Run the CherryPy Request object and obtain the
                         # response
                         try:
-                            request.run(method, path, qs,
-                                        req.request_protocol, headers, rfile)
+                            request.run(
+                                method, path, qs,
+                                tonative(req.request_protocol),
+                                headers, rfile,
+                            )
                             break
                         except cherrypy.InternalRedirect:
                             ir = sys.exc_info()[1]
@@ -81,7 +91,7 @@ class NativeGateway(cheroot.server.Gateway):
                         response.body)
                 finally:
                     app.release_serving()
-        except:
+        except Exception:
             tb = format_exc()
             # print tb
             cherrypy.log(tb, 'NATIVE_ADAPTER', severity=logging.ERROR)
@@ -89,10 +99,11 @@ class NativeGateway(cheroot.server.Gateway):
             self.send_response(s, h, b)
 
     def send_response(self, status, headers, body):
+        """Send response to HTTP request."""
         req = self.req
 
         # Set response status
-        req.status = str(status or '500 Server Error')
+        req.status = status or b'500 Server Error'
 
         # Set response headers
         for header, value in headers:
@@ -107,7 +118,6 @@ class NativeGateway(cheroot.server.Gateway):
 
 
 class CPHTTPServer(cheroot.server.HTTPServer):
-
     """Wrapper for cheroot.server.HTTPServer.
 
     cheroot has been designed to not reference CherryPy in any way,
@@ -117,6 +127,7 @@ class CPHTTPServer(cheroot.server.HTTPServer):
     """
 
     def __init__(self, server_adapter=cherrypy.server):
+        """Initialize CPHTTPServer."""
         self.server_adapter = server_adapter
 
         server_name = (self.server_adapter.socket_host or
