@@ -206,12 +206,14 @@ except ImportError:
     def test_callable_spec(callable, args, kwargs):  # noqa: F811
         return None
 else:
-    getargspec = inspect.getargspec
     # Python 3 requires using getfullargspec if
     # keyword-only arguments are present
     if hasattr(inspect, 'getfullargspec'):
         def getargspec(callable):
             return inspect.getfullargspec(callable)[:4]
+    # Use getargspec with Python 2
+    else:
+        getargspec = inspect.getargspec
 
 
 class LateParamPageHandler(PageHandler):
